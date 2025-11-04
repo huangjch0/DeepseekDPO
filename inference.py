@@ -1,7 +1,3 @@
-"""
-使用微调后的 DeepSeek V3 模型进行推理
-"""
-
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from pathlib import Path
