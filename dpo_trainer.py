@@ -9,8 +9,6 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from typing import Dict, Tuple, Optional
 import logging
-from peft import get_peft_model, LoraConfig, TaskType
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -29,51 +27,38 @@ class DPOTrainer:
         beta: float = 0.5,
         learning_rate: float = 1e-4,
         device: str = "cuda",
-        lora_config: dict = None
     ):
         """
         初始化 DPO 训练器
         
         Args:
             model_name: 模型名称或路径
-            beta: DPO 算法的 beta 参数
+            beta: DPO 温度参数（控制对偏好的强制程度）
             learning_rate: 学习率
-            device: 训练设备
-            lora_config: LoRA 配置字典
+            device: 设备类型
         """
-        self.device = device
+        self.model_name = model_name
         self.beta = beta
+        self.learning_rate = learning_rate
+        self.device = device
         
         # 加载模型和分词器
-        logger.info(f"加载模型: {model_name}")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16,
-            device_map="auto"
+            device_map="auto",
+            offload_folder="offload"
         )
         
-        # 应用 LoRA
-        if lora_config:
-            logger.info("应用 LoRA 配置")
-            peft_config = LoraConfig(
-                task_type=TaskType.CAUSAL_LM,
-                r=lora_config.get("r", 8),
-                lora_alpha=lora_config.get("lora_alpha", 32),
-                lora_dropout=lora_config.get("lora_dropout", 0.1),
-                target_modules=lora_config.get("target_modules", ["q_proj", "v_proj"]),
-                bias=lora_config.get("bias", "none")
-            )
-            self.model = get_peft_model(self.model, peft_config)
-            self.model.print_trainable_parameters()  # 打印可训练参数
-        
-        # 参考模型(不训练)
-        self.ref_model = AutoModelForCausalLM.from_pretrained(
+        # 设置参考模型（用于计算 DPO 损失）
+        self.reference_model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16,
-            device_map="auto"
+            device_map="auto",
+            offload_folder="offload"
         )
-        self.ref_model.eval()
+        self.reference_model.eval()
         
         # 优化器
         self.optimizer = torch.optim.AdamW(
@@ -214,33 +199,8 @@ class DPOTrainer:
         
         return metrics
     
-    def save_model(self, save_path: str, merge_lora: bool = False):
-        """
-        保存模型
-        
-        Args:
-            save_path: 保存路径
-            merge_lora: 是否合并 LoRA 权重到基座模型
-        """
-        Path(save_path).mkdir(parents=True, exist_ok=True)
-        
-        if hasattr(self.model, 'peft_config') and merge_lora:
-            # 合并 LoRA 权重
-            logger.info("合并 LoRA 权重到基座模型...")
-            merged_model = self.model.merge_and_unload()
-            
-            # 保存合并后的模型
-            merged_model.save_pretrained(save_path)
-            self.tokenizer.save_pretrained(save_path)
-            logger.info(f"已保存合并后的模型到 {save_path}")
-        elif hasattr(self.model, 'peft_config'):
-            # 只保存 LoRA 适配器
-            logger.info("保存 LoRA 适配器...")
-            self.model.save_pretrained(save_path)
-            self.tokenizer.save_pretrained(save_path)
-            logger.info(f"已保存 LoRA 适配器到 {save_path}")
-        else:
-            # 保存完整模型
-            self.model.save_pretrained(save_path)
-            self.tokenizer.save_pretrained(save_path)
-            logger.info(f"已保存完整模型到 {save_path}")
+    def save_model(self, output_dir: str):
+        """保存模型和分词器"""
+        self.model.save_pretrained(output_dir)
+        self.tokenizer.save_pretrained(output_dir)
+        logger.info(f"模型已保存到 {output_dir}")

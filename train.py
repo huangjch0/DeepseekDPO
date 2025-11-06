@@ -46,7 +46,7 @@ def train(config: dict):
         beta=config.get("beta", 0.5),
         learning_rate=config.get("learning_rate", 1e-4),
         device=config.get("device", "cuda"),
-        lora_config=config.get("lora", None)  # 传递 LoRA 配置
+        # lora=config.get("lora", {})  # 新增：透传 LoRA 配置
     )
     
     # 创建数据加载器
@@ -103,11 +103,11 @@ def train(config: dict):
             
             global_step += 1
             
-            # 定期保存检查点(保存 LoRA 适配器)
+            # 定期保存模型
             if global_step % save_steps == 0:
                 save_path = output_dir / f"checkpoint-{global_step}"
-                trainer.save_model(str(save_path), merge_lora=False)
-                logger.info(f"检查点已保存到 {save_path}")
+                trainer.save_model(str(save_path))
+                logger.info(f"模型已保存到 {save_path}")
         
         # 输出 epoch 统计
         avg_loss = epoch_loss / len(train_loader)
@@ -119,15 +119,10 @@ def train(config: dict):
             f"平均准确率: {avg_accuracy:.4f}"
         )
     
-    # 保存最终模型 - 合并 LoRA 权重
+    # 保存最终模型
     final_save_path = output_dir / "final_model"
-    merge_lora = config.get("lora") is not None  # 如果使用了 LoRA 就合并
-    trainer.save_model(str(final_save_path), merge_lora=merge_lora)
-    
-    if merge_lora:
-        logger.info(f"LoRA 权重已合并并保存到 {final_save_path}")
-    else:
-        logger.info(f"最终模型已保存到 {final_save_path}")
+    trainer.save_model(str(final_save_path))
+    logger.info(f"最终模型已保存到 {final_save_path}")
     
     writer.close()
 
